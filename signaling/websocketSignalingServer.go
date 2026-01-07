@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"slices"
 	"time"
 
 	qp2p "github.com/BrownNPC/QuicP2P"
@@ -46,13 +45,14 @@ func NewWebsocketSignalingServer(log *slog.Logger, opts websocket.AcceptOptions)
 
 // POST /join/{roomId}
 func (s *WebsocketSignalingServer) join(w http.ResponseWriter, r *http.Request) {
-	const timeout = time.Second * 5 // Close if writes take longer than this
+	const timeout = time.Second * 2 // Close if writes take longer than this
 
 	// roomId is passed from path /join/{roomId}
 	roomId := qp2p.RoomId(r.PathValue("roomId"))
 	// close connection if room does not exist.
 	hConn, ok := s.hosts.Load(roomId)
 	if !ok {
+		s.log.Debug("Guest join room, room does not exist", "id", roomId)
 		return
 	}
 
@@ -81,6 +81,7 @@ func (s *WebsocketSignalingServer) join(w http.ResponseWriter, r *http.Request) 
 		//if invalid message type
 	} else if authMsg.Type != GuestAuth {
 		gConn.Close(websocket.StatusPolicyViolation, fmt.Sprintf("Expected GuestAuth message. Got %s", authMsg.Type))
+		s.log.Debug("GuestAuth message expected, but got something else, closing", "got", authMsg.Type.String())
 		return
 	}
 
@@ -98,11 +99,12 @@ func (s *WebsocketSignalingServer) join(w http.ResponseWriter, r *http.Request) 
 	// Ping loop
 	go func() {
 		for {
-			time.Sleep(timeout / 5 * 2) // 2/5 of timeout
-			ctx, cancel := context.WithTimeout(context.Background(), timeout/5*3 /*3/5 of timeout*/)
+			time.Sleep(time.Second / 2)
+			ctx, cancel := context.WithTimeout(context.Background(), timeout)
 			err := gConn.Ping(ctx)
 			cancel()
 			if err != nil {
+				s.log.Debug("guest shutting down ping loop", "error", err)
 				return
 			}
 		}
@@ -116,21 +118,23 @@ func (s *WebsocketSignalingServer) join(w http.ResponseWriter, r *http.Request) 
 	for {
 		if !lim.Allow() {
 			gConn.Close(websocket.StatusPolicyViolation, "rate limit")
+			s.log.Debug("Guest conn closed for ratelimit hit")
 			return
 		}
 		msg, err := ReadMsg(gConn, timeout)
 		if err != nil {
+			s.log.Debug("Guest shutting down", "error", err)
 			return
 		}
 		if msg.Type == IceCandidate {
-			WriteMsg(hConn, msg, timeout)
+			msgIceCandidate(hConn, timeout, guestId, msg.Candidate)
 		}
 	}
 }
 
 // POST /host
 func (s *WebsocketSignalingServer) host(w http.ResponseWriter, r *http.Request) {
-	const timeout = time.Second * 5 // Close if writes take longer than this
+	const timeout = time.Second * 2 // Close if writes take longer than this
 
 	hConn, err := websocket.Accept(w, r, &s.opts)
 	if err != nil {
@@ -154,11 +158,12 @@ func (s *WebsocketSignalingServer) host(w http.ResponseWriter, r *http.Request) 
 	// Ping loop
 	go func() {
 		for {
-			time.Sleep(timeout / 5 * 2) // 2/5 of timeout
-			ctx, cancel := context.WithTimeout(context.Background(), timeout/5*3 /*3/5 of timeout*/)
+			time.Sleep(time.Second / 2) // 2/5 of timeout
+			ctx, cancel := context.WithTimeout(context.Background(), timeout)
 			err := hConn.Ping(ctx)
 			cancel()
 			if err != nil {
+				s.log.Debug("host shutting down ping loop", "error", err)
 				return
 			}
 		}
@@ -177,11 +182,13 @@ func (s *WebsocketSignalingServer) host(w http.ResponseWriter, r *http.Request) 
 	lim := rate.NewLimiter(5, 20)
 	for {
 		if !lim.Allow() {
-
+			hConn.Close(websocket.StatusPolicyViolation, "rate limit")
+			return
 		}
 		msg, err := ReadMsg(hConn, timeout)
 		if err != nil {
-			break
+			s.log.Debug("host failed to read message", "error", err)
+			return
 		}
 		// forward to guest
 		if msg.Type == HostAuth {
@@ -203,7 +210,7 @@ func (s *WebsocketSignalingServer) host(w http.ResponseWriter, r *http.Request) 
 				s.log.Debug("IceCandidate message invalid guest id, guest not found", "id", msg.GuestId)
 				continue
 			}
-			go WriteMsg(gConn, msg, timeout)
+			go msgIceCandidate(gConn, timeout, msg.GuestId, msg.Candidate)
 		}
 	}
 }

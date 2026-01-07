@@ -66,6 +66,8 @@ const (
 	KickGuest
 )
 
+// ### Full Signaling Flow
+//
 // Host -> Server POST /host
 //
 // Server -> Host Msg{RoomCreated: RoomId)
@@ -77,6 +79,14 @@ const (
 // Server -> Host Msg{GuestJoined: GuestId,Ufrag,Pwd}
 //
 // Host -> Server -> Guest Msg{HostAuth: GuestId,Ufrag,Pwd}
+//
+// Guest -> Server -> Host Msg{IceCandidate: Candidate}
+//
+// Host  -> Server -> Guest Msg{IceCandidate: GuestId,Candidate}
+//
+// (Guest Lost Connection) Server -> Host Msg{GuestDisconnected: GuestId}
+// 
+// (Host Lost Connection) Server -> Guest Msg{KickGuest: GuestId, Reason "Host is offline."}
 type Msg struct {
 	Type       MsgType
 	RoomId     qp2p.RoomId
