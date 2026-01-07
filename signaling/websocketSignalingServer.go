@@ -39,7 +39,7 @@ func NewWebsocketSignalingServer(log *slog.Logger, opts websocket.AcceptOptions)
 	s.opts = opts
 	s.Mux = new(http.ServeMux)
 	s.Mux.HandleFunc("POST /host", s.host)
-	s.Mux.HandleFunc("POST /join/{roomId}", s.host)
+	s.Mux.HandleFunc("POST /join/{roomId}", s.join)
 	return s
 }
 

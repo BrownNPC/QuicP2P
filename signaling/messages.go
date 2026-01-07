@@ -85,7 +85,7 @@ const (
 // Host  -> Server -> Guest Msg{IceCandidate: GuestId,Candidate}
 //
 // (Guest Lost Connection) Server -> Host Msg{GuestDisconnected: GuestId}
-// 
+//
 // (Host Lost Connection) Server -> Guest Msg{KickGuest: GuestId, Reason "Host is offline."}
 type Msg struct {
 	Type       MsgType
@@ -231,17 +231,17 @@ func ReadMsg(conn *websocket.Conn, timeout time.Duration) (Msg, error) {
 	// read
 	t, b, err := conn.Read(ctx)
 	if err != nil {
-		return Msg{}, fmt.Errorf("signaling.readMsg: %v", err)
+		return Msg{}, fmt.Errorf("signaling.readMsg: %w", err)
 	}
 	// return error if message is not binary payload.
 	if t != websocket.MessageBinary {
-		return Msg{}, fmt.Errorf("signaling.readMsg: message type is not binary", err)
+		return Msg{}, fmt.Errorf("signaling.readMsg: message type is not binary %w", err)
 	}
 	// unmarshal binary payload
 	msg := new(Msg)
 	err = msgpack.UnmarshalAsArray(b, msg)
 	if err != nil {
-		return Msg{}, fmt.Errorf("signaling.readMsg: failed to unmarshal message as array")
+		return Msg{}, fmt.Errorf("signaling.readMsg: failed to unmarshal message as array %w", err)
 	}
 
 	return *msg, nil
